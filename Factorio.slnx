@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="Factorio.vcxproj" Id="d7a1957a-129a-4152-80f0-3ffca22bddf4" />
+</Solution>
