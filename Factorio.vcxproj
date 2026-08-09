@@ -127,8 +127,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="Factorio.cpp" />
-    <ClCompile Include="FactorioDumb.cpp" />
+    <ClCompile Include="FactorioClass.cpp" />
+    <ClCompile Include="FactorioLambda.cpp" />
+    <ClCompile Include="FactorioReverse.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
