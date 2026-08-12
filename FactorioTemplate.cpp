@@ -56,41 +56,33 @@ template <class Base, class... Rs> struct chain { using type = Base; };
 template <class Base, class R, class... Rs>
 struct chain<Base, R, Rs...> : chain<node<Base, R>, Rs...> {};
 
-template <class... Rs>
-struct production {
-	// the last node in the chain: the object you instantiate
-	using materials = typename chain<root, Rs...>::type;
-	// and its lookup, re-exported so it is usable without an object
-	template <class Item> using material = typename materials::template material<Item>;
-};
-
-
-using factory = production<
+using factory = chain<
+	root,
 	recipe<struct crude, 1, 0.0>, // ore patch: no ingredients
 	recipe<struct iron, 1, 3.2>,
 	recipe<struct gear, 1, 0.5, ingredient<iron, 2>>,
 	recipe<struct belt, 2, 0.5, ingredient<iron, 1>, ingredient<gear, 1>>,
 	recipe<struct petro, 45, 5.0, ingredient<crude, 100>> // basic oil processing
->;
+>::type;
 
 // queries that need no object
 static_assert(factory::material<belt>::amount == 2);
 static_assert(factory::material<iron>::time == std::chrono::duration<double>{3.2});
 
-constexpr factory::materials run() {
-	factory::materials m{};
-	m.material<belt>::throughput += 10;
-	m.material<petro>::throughput += 90;
-	m.sweep();
-	return m;
+constexpr factory run() {
+	factory f{};
+	f.material<belt>::throughput += 10;
+	f.material<petro>::throughput += 90;
+	f.sweep();
+	return f;
 }
 
 int main() {
-	constexpr auto m = run();
-	static_assert(m.material<gear>::throughput == 5);
-	static_assert(m.material<iron>::throughput == 15);
-	static_assert(m.material<crude>::throughput == 200);
+	constexpr auto f = run();
+	static_assert(f.material<gear>::throughput == 5);
+	static_assert(f.material<iron>::throughput == 15);
+	static_assert(f.material<crude>::throughput == 200);
 	std::printf("belt=%g gear=%g iron=%g crude=%g\n",
-		m.material<belt>::throughput, m.material<gear>::throughput,
-		m.material<iron>::throughput, m.material<crude>::throughput);
+		f.material<belt>::throughput, f.material<gear>::throughput,
+		f.material<iron>::throughput, f.material<crude>::throughput);
 }
