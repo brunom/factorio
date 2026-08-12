@@ -4,5 +4,6 @@
     <ClCompile Include="FactorioClass.cpp" />
     <ClCompile Include="FactorioReverse.cpp" />
     <ClCompile Include="FactorioLambda.cpp" />
+    <ClCompile Include="FactorioTemplate.cpp" />
   </ItemGroup>
 </Project>

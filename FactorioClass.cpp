@@ -28,7 +28,7 @@ struct belt : gear
 };
 struct cookbook : belt {};
 
-int main()
+void mainClass()
 {
 	cookbook cb;
 	cb.belt::amount += 10;

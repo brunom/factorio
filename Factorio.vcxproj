@@ -130,6 +130,7 @@
     <ClCompile Include="FactorioClass.cpp" />
     <ClCompile Include="FactorioLambda.cpp" />
     <ClCompile Include="FactorioReverse.cpp" />
+    <ClCompile Include="FactorioTemplate.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
