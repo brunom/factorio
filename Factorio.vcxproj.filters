@@ -6,5 +6,6 @@
     <ClCompile Include="FactorioLambda.cpp" />
     <ClCompile Include="FactorioTemplate.cpp" />
     <ClCompile Include="FactorioFreeMaterial.cpp" />
+    <ClCompile Include="FactorioNodeMaterial.cpp" />
   </ItemGroup>
 </Project>
