@@ -38,13 +38,17 @@ template <class Item, int Amount = 1> struct ingredient {
 // what you write: pure description
 template <class Item, int Amount, double Time, class... Ings> struct recipe {};
 
-template <class Base, class Item, int Amount, double Time, class... Ings> struct node;
+template <class Item, class Base, int Amount, double Time, class... Ings> struct node;
 
-// declared only: names the node for Item among the bases of what is passed
+// Declared only: names the node for Key among the bases of what is passed.
+// Item leads node's parameter list so that this pattern mismatches on its
+// very first argument. With Item behind a deducible parameter, MSVC lets the
+// failed top-level match leak into the base-class search and calls it
+// ambiguous; the other files put the key first for the same reason.
+template <class Key, class Rest, int Count, double Seconds, class... Uses>
+node<Key, Rest, Count, Seconds, Uses...> made(node<Key, Rest, Count, Seconds, Uses...>*);
+
 template <class Item, class Base, int Amount, double Time, class... Ings>
-node<Base, Item, Amount, Time, Ings...> made(node<Base, Item, Amount, Time, Ings...>*);
-
-template <class Base, class Item, int Amount, double Time, class... Ings>
 struct node : Base {
 	double throughput = 0;
 	static constexpr int amount = Amount;
@@ -62,7 +66,7 @@ struct node : Base {
 template <class Base, class... Rs> struct chain { using type = Base; };
 template <class Base, class Item, int Amount, double Time, class... Ings, class... Rs>
 struct chain<Base, recipe<Item, Amount, Time, Ings...>, Rs...>
-	: chain<node<Base, Item, Amount, Time, Ings...>, Rs...> {};
+	: chain<node<Item, Base, Amount, Time, Ings...>, Rs...> {};
 
 using factory = chain<
 	root,
