@@ -25,21 +25,30 @@ struct recipes {
 	template<class... Ings>
 	struct orders
 	{
+		// via has to be written first and has to stay a function. A function
+		// body is a complete-class context, so it may name demand before demand
+		// is declared; a variable template's initializer may not look forward.
+		// The if constexpr is what breaks the self-reference -- a plain ternary
+		// would still instantiate demand<Item> while defining it.
+		template <class Item, class R>
+		static constexpr double via() {
+			if constexpr (R::template uses<Item> == 0) return 0;              // not a consumer
+			else return demand<typename R::item>                   // how many of R
+				* R::template uses<Item> / R::amount;                   // times its rate
+		}
+
 		// demand for Item: what was ordered, plus what every recipe that consumes
 		// it needs. No inversion -- the fold visits every recipe and the ones that
 		// do not use Item contribute nothing.
+		//
+		// A variable template rather than a function, because a specialization is
+		// instantiated once and a constexpr call is not: written as a function
+		// this is re-walked once per path from Item up to the orders, which is
+		// exponential on a graph where paths multiply.
 		template <class Item>
-		static constexpr double demand() {
-			return ((same<Item, typename Ings::item> ? double(Ings::amount) : 0) + ... + 0)
-				+ (via<Item, Rs>() + ... + 0);
-		}
-
-		template <class Item, class R>
-		static constexpr double via() {
-			if constexpr (R::template uses<Item> == 0) return 0;                 // not a consumer
-			else return demand<typename R::item>()                    // how many of R
-				* R::template uses<Item> / R::amount;                      // times its rate
-		}
+		static constexpr double demand =
+			((same<Item, typename Ings::item> ? double(Ings::amount) : 0) + ... + 0)
+			+ (via<Item, Rs>() + ... + 0);
 	};
 };
 
@@ -53,7 +62,7 @@ using factory = recipes<
 	ingredient<belt, 10>,
 	ingredient<petro, 90>>;
 
-static_assert(factory::demand<belt>() == 10);
-static_assert(factory::demand<gear>() == 5);
-static_assert(factory::demand<iron>() == 15);
-static_assert(factory::demand<crude>() == 200);
+static_assert(factory::demand<belt> == 10);
+static_assert(factory::demand<gear> == 5);
+static_assert(factory::demand<iron> == 15);
+static_assert(factory::demand<crude> == 200);
