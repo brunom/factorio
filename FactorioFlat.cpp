@@ -66,7 +66,7 @@ constexpr factory run() {
 	return f;
 }
 
-int main() {
+void reverse_flat() {
 	constexpr auto f = run();
 	static_assert(f.material<gear>::throughput == 5);
 	static_assert(f.material<iron>::throughput == 15);
