@@ -129,6 +129,7 @@
   <ItemGroup>
     <ClCompile Include="FactorioClass.cpp" />
     <ClCompile Include="FactorioClassReverse.cpp" />
+    <ClCompile Include="FactorioDtor.cpp" />
     <ClCompile Include="FactorioFlatReverse.cpp" />
     <ClCompile Include="FactorioFreeMaterial.cpp" />
     <ClCompile Include="FactorioLambda.cpp" />

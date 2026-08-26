@@ -9,5 +9,6 @@
     <ClCompile Include="FactorioFlat.cpp" />
     <ClCompile Include="FactorioFlatReverse.cpp" />
     <ClCompile Include="FactorioClassReverse.cpp" />
+    <ClCompile Include="FactorioDtor.cpp" />
   </ItemGroup>
 </Project>

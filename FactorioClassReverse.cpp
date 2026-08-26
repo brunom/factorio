@@ -440,7 +440,7 @@ static void bill(double rate) {
 		count_v<electricity, Output> * rate, count_v<electricity, Output> * rate / 1000);
 }
 
-int main() {
+void classReverse() {
 	print("{} {:g}   {} {:g}   {} {:g}   lab {:g}\n",
 		name<assembly>(), assembly::speed, name<furnace>(), furnace::speed,
 		name<drill>(), drill::speed, lab::speed);
