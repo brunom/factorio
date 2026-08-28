@@ -64,16 +64,23 @@
 //     void sum ::operator+=(double rate) { left += rate; right += rate; }
 //     void prod::operator+=(double rate) { what += rate * amount; }
 //
+// The report rides on them one call further down: `what += ...` arrives at
+// item::operator+=, which is where a link is both added and written.
+//
 // The parentheses have to close before the `/`. Written
 // `(boiler + fuel*0.45 + water*6.0/60)` it compiles and divides the water
 // alone.
 //
 // A machine is an item like any other, because a machine makes something too:
-// it makes crafting. Its speed is the divisor on its own inputs, so what a
-// machine's line counts is seconds of crafting rather than machines -- a
-// furnace at 2.00 shows twice its count, and its speed is on its own line to
-// divide by. That is what dropping the count from the item cost; it used to be
-// the number that turned the one into the other.
+// it makes crafting. Its speed is the divisor on the LINK into it and not on
+// its own inputs. The wiki's 75 kW is per machine-second; a recipe asks for
+// seconds of crafting; speed is the rate between the two clocks. Divide the
+// machine's own inputs by it and the kilowatts still come out right --
+// 77.5/0.50 is what the two machines draw -- but the line then counts seconds
+// of crafting, and a furnace at 2.00 shows twice its count. Divide the link
+// and the line is a machine count, which is also the only place a leaf can
+// say its speed at all: a burner drill has no inputs to divide it into. A
+// machine at 1.00 needs no term of its own: its node already is one.
 //
 // The `/` is a rescaling of the terms inside it and not a node of its own, but
 // it is written once at the end of the recipe rather than folded into each
@@ -95,10 +102,13 @@
 // instead of converting it to a term, so the copy went into the tree, charged
 // its own inputs, printed its own line, and left the real one at nothing. Once
 // it was `operator+(auto left, in right)`; once a deduction guide a constructor
-// wrote for free, which gave four ore patches their own private drill, 10 and
-// 6.5 and 10.5 and 25.25 where the one drill should have said 52.25; once a
+// wrote for free, which gave four ore patches their own private drill, 20 and
+// 13 and 21 and 50.5 where the one drill should have said 104.5; once a
 // deduced `Ins`. Each time it compiled, and each time every material figure was
-// still correct, which is exactly as much warning as it gave.
+// still correct, which is exactly as much warning as it gave. Those same four
+// figures are printed now, as the drill links under stone, coal, copper ore and
+// iron ore -- so the bug would show as four totals where there is one, which is
+// the same arithmetic in the wrong column.
 //
 // Deleting the copy is worth more than everything that was tried against those
 // in turn -- concrete parameters, a `not an item` concept, four deduction
@@ -178,24 +188,37 @@
 //     classes, ten declarations against four, because a `const &` accepts
 //     rvalues and a plain `&` rejects `(a + b)*2` along with them.
 //
-// WHAT IS PRINTED, and by which of the two destructors. ~recipe is the sweep
-// and ~item is the line, and a base is destroyed after the rest of the object, so
-// each item charges what it takes and then says its own total. One line per
-// item, product first, because that is the order things are destroyed in; read
-// upwards for the order a factory is built.
+// WHAT IS PRINTED, and where from. Two kinds of line, and only one of them
+// comes from a destructor.
 //
-// The line is the item's and not the term's, which is what a recipe column
-// cost: an amount belongs to a term and an item has several. In exchange an
-// item says its total once instead of its share once per asker, and the item
-// with no recipe at all -- an offshore pump -- says it too, which is what a
-// line printed from a term could never do.
+//   * A link -- what one recipe takes of one thing a second -- is written by
+//     item::operator+= as the charge arrives, indented, once per asker.
+//   * A total is written by ~item, when there is nothing left to arrive.
+//     ~recipe is the sweep and a base is destroyed after the rest of the
+//     object, so by then every input has been charged and has said so.
+//
+// A block therefore reads its inputs first and its own total last, and that is
+// not a choice: nothing can print a heading for charges its own members have
+// not made yet. Products come first overall, because that is the order things
+// are destroyed in; read upwards for the order a factory is built.
+//
+// Both lines are the item's and neither is the term's, which is what a recipe
+// column cost: an amount belongs to a term and an item has several, so no one
+// row can name a single machine and a single count. What the item does get is
+// the number the term charged it, and that number is the link -- so a share is
+// said once per asker and a total once, and the item with no recipe at all, an
+// offshore pump, still says its total. Summing the links printed under a name
+// reproduces that name's own total line, which is the listing checking itself.
 //
 // WHAT THIS DOES NOT DO:
 //
 //   * Nothing can be asked after a run, so the wiki's numbers cannot be
 //     static_asserts. They are in the comment at the end.
-//   * ostream::operator<< may throw and a destructor may not, so a failure to
-//     write would call std::terminate rather than propagate.
+//   * ostream::operator<< may throw and a destructor may not. A total is
+//     written from ~item and a link from a charge a destructor made, so either
+//     way a failure to write would call std::terminate rather than propagate.
+//   * The sweep and the report are one walk, so there is no quiet mode: a
+//     charge cannot be made without a line being written.
 //   * One graph answers for one product, and the graph is a block rather than
 //     a type, so a second product is a second copy of it.
 //
@@ -210,10 +233,11 @@
 // There is no chrono here, and no time field for it to type. A recipe's time is
 // on the machine's own input line, where it shares a field with an ingredient's
 // count, and that sharing is what lets one shape serve both: an amount is
-// always measured in the input's own unit, and a furnace's unit happens to be a
-// second of crafting. Typing it a duration would assert otherwise. Nothing else
-// is a candidate either -- chrono measures durations and has no frequency, so a
-// rate has no chrono spelling at all.
+// always measured in the unit of the term it multiplies, and a machine's term is
+// a second of crafting -- the item under it counts machines, and the speed on the
+// term is what stands between the two. Typing it a duration would assert
+// otherwise. Nothing else is a candidate either -- chrono measures durations
+// and has no frequency, so a rate has no chrono spelling at all.
 //
 // A line is written to a stream and not through a format string. A format
 // string is checked against its arguments at compile time, which is worth
@@ -383,12 +407,23 @@ struct item {
 	// does not compile, wherever it is written.
 	item(const item&) = delete;
 
-	void operator+=(double per_second) { rate += per_second; }
+	// Charged by whoever wants it, and it says so on the way in: `per_second`
+	// is what one recipe takes of this a second, which is one link. Both of an
+	// item's lines are written here, the share as it arrives and the total when
+	// there is nothing left to arrive -- so an item several recipes ask for
+	// says each share once per asker and its total once, at the end.
+	void operator+=(double per_second) {
+		if (per_second == 0.0) return;   // nobody asked, so there is no link
+		rate += per_second;
+		std::cout << "    " << std::left  << std::setw(18) << name
+		          << std::right << std::fixed << std::setprecision(4)
+		          << std::setw(13) << per_second << "\n";
+	}
 
-	// The line, and the only place anything is printed. A base is destroyed
-	// after the rest of the object, so by the time this runs the recipe below
-	// has already charged whatever it takes -- and an item with no recipe under
-	// it, which is the whole of an offshore pump, still gets here.
+	// The total, and it comes last: a base is destroyed after the rest of the
+	// object, so by the time this runs the recipe below has charged -- and
+	// printed -- every input, and an item with no recipe under it, which is the
+	// whole of an offshore pump, still gets here.
 	~item() {
 		if (rate == 0.0) return;    // nobody asked for it
 		std::cout << "  " << std::left  << std::setw(20) << name
@@ -397,9 +432,14 @@ struct item {
 	}
 };
 
-// A term charges what it is about, and that is all it does: the line is the
-// item's, so an item that several recipes ask for says its total once rather
-// than its share once per asker.
+// A term charges what it is about, and that is all it does -- the two lines
+// of the sweep stay the two lines of the sweep. What it charges is the link,
+// so the item it lands on has the number it needs to say, and says it there.
+// A block therefore reads inputs first and total last, which is not a choice:
+// a base is destroyed after its members, so nothing can print a heading for
+// charges its own members have not made yet. The seed at the end of factory()
+// writes `research_unit.rate` and not the item, so the demand is not a link
+// and does not print as one.
 inline void prod::operator+=(double rate) { what += rate * amount; }
 
 // ---------------------------------------------------------------------------
@@ -456,9 +496,11 @@ static void factory() {
 	auto boiler        = item("boiler");
 	auto steam_engine  = item("steam_engine");
 	// mining speed 0.25 less the 0.0375 a second it burns of what it mines, so
-	// 0.2125 -- which now only says how many drills a coal a second is, and it
-	// has nowhere to be said, because a leaf has no inputs to divide it into
-	auto burner_drill  = item("burner_drill");
+	// 0.2125 -- and a leaf has no inputs to divide it into, which is the whole
+	// argument for the divisor being on the link: a machine with no recipe of
+	// its own still has a speed, and this is where it says it.
+	auto burner_drill_impl = item("burner_drill");
+	auto burner_drill      = burner_drill_impl / 0.2125;
 
 	auto water = recipe("water", offshore_pump/1200);
 	auto fuel  = recipe("fuel",  burner_drill);      // coal, off the power grid
@@ -474,27 +516,38 @@ static void factory() {
 	// The machines that burn fuel: what one second of one costs is its
 	// consumption over coal's 4 MJ. The fuel is the one the boilers take, mined
 	// by a burner drill, which is what keeps a furnace out of the electric
-	// drill's chain and so out of a cycle. The speed is the divisor, so what a
-	// machine's line counts is seconds of crafting and not machines.
-	auto stone_furnace = recipe("stone_furnace", fuel*(90.0 / 4000.0));
-	auto steel_furnace = recipe("steel_furnace", fuel*(90.0 / 4000.0) / 2.00);
+	// drill's chain and so out of a cycle.
+	auto stone_furnace      = recipe("stone_furnace", fuel*(90.0 / 4000.0));
+	auto steel_furnace_impl = recipe("steel_furnace", fuel*(90.0 / 4000.0));
+	auto steel_furnace      = steel_furnace_impl / 2.00;
 
-	// The machines that take power: energy consumption, then drain, which is
-	// charged whether it is working or not, over the speed.
-	auto assembly_1       = recipe("assembly_1", electricity*(75.0 + 2.5)   / 0.50);
-	auto assembly_2       = recipe("assembly_2", electricity*(150.0 + 5.0)  / 0.75);
-	auto assembly_3       = recipe("assembly_3", electricity*(375.0 + 12.5) / 1.25);
-	auto electric_furnace = recipe("electric_furnace", electricity*(180.0 + 6.0) / 2.00);
-	auto chemical_plant   = recipe("chemical_plant", electricity*(210.0 + 7.0));
-	auto refinery         = recipe("refinery", electricity*(420.0 + 14.0));
+	// The machines that take power. The wiki gives two numbers and they add:
+	// energy consumption while working, then drain, which is charged whether it
+	// is working or not -- an active assembling machine 2 draws 155 kW. Both are
+	// per machine-second, so they are written on the machine and not divided.
+	//
+	// Under each is its speed, on the link: a second of crafting takes 1/speed
+	// machine-seconds, which is where the two clocks meet. A machine at 1.00
+	// needs no second line -- its node already is the term.
+	auto assembly_1_impl       = recipe("assembly_1", electricity*(75.0 + 2.5));
+	auto assembly_1            = assembly_1_impl / 0.50;
+	auto assembly_2_impl       = recipe("assembly_2", electricity*(150.0 + 5.0));
+	auto assembly_2            = assembly_2_impl / 0.75;
+	auto assembly_3_impl       = recipe("assembly_3", electricity*(375.0 + 12.5));
+	auto assembly_3            = assembly_3_impl / 1.25;
+	auto electric_furnace_impl = recipe("electric_furnace", electricity*(180.0 + 6.0));
+	auto electric_furnace      = electric_furnace_impl / 2.00;
+	auto chemical_plant        = recipe("chemical_plant", electricity*(210.0 + 7.0));
+	auto refinery              = recipe("refinery", electricity*(420.0 + 14.0));
 	// mining speed 1 times the patch's yield: a 538% patch is 5.38, and the
-	// recipe below is 10 crude a second, which is what 100% yields
-	auto pumpjack       = recipe("pumpjack",
-	                           electricity*(90.0 + 3.0) / (1.00 * (1 + mining_productivity)));
-	auto electric_drill = recipe("electric_drill",
-	                           electricity*(90.0 + 3.0) / (0.50 * (1 + mining_productivity)));
-	auto lab            = recipe("lab",
-	                           electricity*(60.0 + 2.0) / (1.00 * (1 + lab_research_speed)));
+	// recipe below is 10 crude a second, which is what 100% yields. The dials
+	// are speeds too, so these three keep a term even at a base figure of 1.00.
+	auto pumpjack_impl         = recipe("pumpjack", electricity*(90.0 + 3.0));
+	auto pumpjack              = pumpjack_impl / (1.00 * (1 + mining_productivity));
+	auto electric_drill_impl   = recipe("electric_drill", electricity*(90.0 + 3.0));
+	auto electric_drill        = electric_drill_impl / (0.50 * (1 + mining_productivity));
+	auto lab_impl              = recipe("lab", electricity*(60.0 + 2.0));
+	auto lab                   = lab_impl / (1.00 * (1 + lab_research_speed));
 
 	// What is built. References, so they are not objects and take no part in
 	// the order -- and a reference to a local cannot name one written below it
@@ -567,8 +620,12 @@ static void factory() {
 	// technology's time. Drop the packs your current research does not need and
 	// the labs and their power fall out of the same graph.
 	auto research_unit = recipe("research_unit",
-	                          lab*30.0 + automation_pack + logistic_pack
-	                          + chemical_pack + military_pack);
+		lab*30.0
+		//+ automation_pack 
+		//+ logistic_pack	                          
+		//+ chemical_pack 
+		+ military_pack
+	);
 
 	research_unit.rate += 1.0;
 }
@@ -588,4 +645,4 @@ static void factory() {
 // The kilowatts are electricity's own line, because a kilowatt is an item.
 // ---------------------------------------------------------------------------
 
-//int main() { factory(); }
+int main() { factory(); }
