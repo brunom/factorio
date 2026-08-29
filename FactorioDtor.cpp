@@ -31,39 +31,41 @@
 // The `/` is a scaling rather than a node, so it needs no type of its own. The
 // two of them together are named once, as a concept:
 //
-//     template <class T> concept input =
-//         std::is_same_v<T, prod> ||
-//         (std::is_same_v<T, sum<decltype(T::left), decltype(T::right)>>
-//          && T::an_input);
+//     template <class T> concept leaf  = std::is_same_v<T, prod<...decltype(T::what)>>;
+//     template <class T> concept tree  = std::is_same_v<T, sum<decltype(T::left),
+//                                                            decltype(T::right)>>;
+//     template <class T> concept input = leaf<T> || tree<T> || is_same_v<T, nothing>;
 //
 // and the family is closed. Not by being declared -- a declared membership is
 // an invitation, and any later class can accept it by carrying the same member
 // -- but by identity: to be an input you have to BE a prod, or be the very sum
 // built out of your own two member types, which only a sum is. A concept cannot
 // be specialized and there is no table beside the classes, so there is nothing
-// left to add yourself to. sum's `an_input` is `input<Left> && input<Right>`,
-// so the invariant rides along behind the identity check, where declaring it
-// gains a stranger nothing.
+// left to add yourself to. The halves are named rather than written once,
+// because `leaf` is also what the scaling operator asks in an `if constexpr`,
+// and it is SFINAE-safe there in a way a bare is_same_v would not be: asking a
+// sum for its `what` has to be a no rather than an error.
 //
-// Neither is one of them. A `node` is a name and a rate and the thing a term
-// points at; an `item<Ins = nothing>` is a node with what one of it takes on
-// top, and every declaration in the graph is one -- an offshore pump takes
-// `nothing`, an empty input list rather than the absence of one. That costs a
-// type and an empty member and buys the whole of the algorithm in a single
-// destructor, which is what puts a heading above its own inputs instead of
-// below them.
+// A sum does not check its own halves. It cannot have bad ones: an operator is
+// the only thing that builds a sum, and an operator takes nothing else.
 //
-// The two cannot be one class, and the reason is prod: a term holds a reference
-// to what it is about, and a reference has to name a type. `item<Ins>` is a
-// different type per recipe, so the thing a term points at has to be the part
-// that does not vary -- and erasing that difference instead is the virtual or
-// the std::function this file does not have. So `node` is not a layer, it is
-// the referent, and `item` is everything a declaration actually is.
+// An item is not one of them. `item<Ins = nothing>` is a name, a rate, and what
+// one of it takes -- every declaration in the graph is one, and an offshore
+// pump takes `nothing`, an empty input list rather than the absence of one.
+// That costs a type and an empty member and buys the whole of the algorithm in
+// a single destructor, which is what puts a heading above its own inputs
+// instead of below them.
 //
-// An item becomes an expression only by being converted to a prod. That is the
-// one door in, it is the only place a reference is taken, and it is why the
-// deduced half of each operator, which takes an `input`, will not look at a
-// bare item at all.
+// There is no second class under it. There was: a term has to hold a reference
+// and a reference has to name a type, so while prod was concrete the thing it
+// pointed at had to be the part of an item that did not vary -- a base. `prod`
+// is a template now, so it names `item<Ins>` itself and the base is gone.
+//
+// An item becomes an expression through `link`, which is the one door in and
+// the only place a reference is taken. It is an overload set and not a
+// conversion, and that is the point: deduction never converts, so an operator
+// that deduces its operands cannot be handed a bare item -- but it can hand it
+// to `link` in its own body, where overload resolution applies again.
 //
 // `boiler` on its own is one boiler-second, `fuel*0.45` is 0.45 coal, and the
 // `/60` is the sixty steam a craft makes -- said once over the whole recipe
@@ -75,7 +77,7 @@
 //     void prod::operator+=(double rate) { what += rate * amount; }
 //
 // The report rides on them one call further down: `what += ...` arrives at
-// node::operator+=, which is where a link is both added and written.
+// item::operator+=, which is where a link is both added and written.
 //
 // The parentheses have to close before the `/`. Written
 // `(boiler + fuel*0.45 + water*6.0/60)` it compiles and divides the water
@@ -90,7 +92,7 @@
 // of crafting, and a furnace at 2.00 shows twice its count. Divide the link
 // and the line is a machine count, which is also the only place a leaf can
 // say its speed at all: a burner drill has no inputs to divide it into. A
-// machine at 1.00 needs no term of its own: its node already is one.
+// machine at 1.00 needs no term of its own: its item already is one.
 //
 // The `/` is a rescaling of the terms inside it and not a node of its own, but
 // it is written once at the end of the recipe rather than folded into each
@@ -107,8 +109,8 @@
 //
 // ONE RULE, AND IT IS A BUILD ERROR. An item is a vertex in a graph with a
 // destructor that charges its inputs, so a copy of one is always a mistake, and
-// its base says so once for all of them: `node(const node&) = delete`, which
-// makes every item's own copy constructor implicitly deleted. Every version
+// item says so: `item(const item&) = delete`, which also suppresses the move
+// constructor, so an rvalue item has no way into anything. Every version
 // been bitten by the same mistake -- a parameter that took an item by value
 // instead of converting it to a term, so the copy went into the tree, charged
 // its own inputs, printed its own line, and left the real one at nothing. Once
@@ -133,12 +135,12 @@
 // because with no operator in the expression to convert it, a bare item was
 // deduced and copied, and the delete turned that into an error at the line that
 // wrote it. But an error is not the right answer to a recipe that is written
-// correctly, and recipe gets it for one line. Its constructor takes `Ins`
-// itself, so for an item<prod> the parameter reads `prod`, concretely, and a
-// bare item converts on the way in exactly as it does at an operator. The
-// constructor writes the deduced guide for itself; the concrete one is the
-// single guide left in the file. The `*1` is gone, and of the four guides that
-// once forbade things, one that permits is what is left.
+// correctly, and the constructor gets it for one line: it takes `Ins` itself,
+// so CTAD deduces the whole written expression from the argument and writes
+// the guide for free. The `*1` is gone, and of the four guides that once
+// forbade things, one that permits is what is left -- `item(const char*) ->
+// item<nothing>`, because nothing is the one thing not deducible from an
+// argument that is not there.
 //
 // So the delete stands for `auto dup = iron_plate;`, which is the mistake
 // itself and has no correct spelling.
@@ -147,20 +149,23 @@
 // reference to an item, so a reference to a temporary would outlive what it
 // points at -- and the only way an item enters an expression is
 //
-//     prod(node& what, double amount = 1.0)
+//     template <class Ins> prod<item<Ins>> link(item<Ins>& what);
 //
 // A temporary does not bind to a non-const lvalue reference, so there is no
 // such expression to build. Nothing is refused by name and there is no list of
-// refusals to have got wrong: the one door in is the wrong shape for it.
+// refusals to have got wrong: the one door in is the wrong shape for it. What
+// keeps that true from inside an operator is std::forward -- an operand that
+// arrived as a temporary is handed on as an rvalue, and the other `link` takes
+// an `input` by value, which an item is not.
 //
 // That is why item does not inherit from an expression here. It did, for a
 // while, and it bought something real -- an item WAS a sum, deduction found it
 // by walking bases, and each operator could be written once instead of twice,
-// three functions where there are now six. But a by-value parameter then sliced
+// three functions where there are now three. But a by-value parameter then sliced
 // the item's base subobject out of a temporary, and stopping that took a
-// deleted constructor, and a deleted constructor is a list. `sum(node&&)`
+// deleted constructor, and a deleted constructor is a list. `sum(item&&)`
 // alone missed const rvalues -- that compiled, and the sanitizer called it a
-// stack-use-after-scope. `sum(const node&&)` beside it shut that spelling and
+// stack-use-after-scope. `sum(const item&&)` beside it shut that spelling and
 // left the same question open about the next. Constraining it instead
 // (`template <a_temporary T> sum(T&&) = delete`) answered the question without
 // a list, and was still a rule about what may not happen rather than about what
@@ -174,16 +179,18 @@
 // THREE RULES THAT ARE STILL THE READER'S:
 //
 //   * Overload resolution applies a user conversion; template argument
-//     deduction never does. That is the whole of why each operator is written
-//     twice: the concrete half names `prod`, so a bare item is converted into
-//     one on the way in, and the deduced half names `input`, so it takes a tree
-//     and a conversion is never considered for it. Deduction does walk the
+//     deduction never does. Each operator was written twice for years because
+//     of it -- a concrete half naming `prod` so a bare item converted on the
+//     way in, and a deduced half naming `input` so it took a tree. `link` is
+//     the same rule read backwards: an overload set can do at a call what a
+//     conversion cannot do at a deduced parameter, so the operator deduces
+//     everything and asks `link` inside its own body. Deduction does walk the
 //     argument's base classes for one that matches the pattern, and that door
 //     was open for a while -- an item inherited from a sum and every operator
 //     collapsed to one. It is deliberately shut again, and the compiler says so
 //     in as many words: `'item' is not derived from 'sum<A, B>'`.
 //     DeductionRepro.cpp is that sentence in thirty lines.
-//   * prod holds a node by reference and every term above it holds what is
+//   * prod holds an item by reference and every term above it holds what is
 //     under it by value. That split is the lifetime rule and the whole of the
 //     safety: an item outlives every term about it, and an expression is a
 //     prvalue that would not, so only the leaf may point at anything. The
@@ -206,7 +213,7 @@
 //     recipe that wanted any of this is further down the block and has been
 //     destroyed. Then the charge, which is the sweep and the rest of the line.
 //   * A link -- what one recipe takes of one thing a second -- is written by
-//     node::operator+= as that charge arrives, indented, once per asker.
+//     item::operator+= as that charge arrives, indented, once per asker.
 //
 // So a block is a heading and then what it takes, the same order as the whole
 // listing: a product before what it is made of. Getting it needed the two
@@ -262,6 +269,7 @@
 #include <iomanip>
 #include <iostream>
 #include <type_traits>
+#include <utility>
 
 // ---------------------------------------------------------------------------
 // What has been researched. Nothing else is a dial: no modules, and a machine
@@ -280,22 +288,19 @@ constexpr double lab_research_speed  = 0.00;   // +2.50 with all six levels
 // product -- how much of what -- a sum of two, and one over how many a craft
 // makes. Each knows how to take a rate, and that is all any of them is for.
 //
-// prod is not a template, which is what makes every operator below a plain
-// function with a concrete parameter. A bare item converts to a prod on the
-// way in, and a conversion is something overload resolution will do where
-// template argument deduction never would. That is the whole reason there is
-// no box, no member operators and no concepts here: `boiler + fuel*0.45` works
-// because `operator+(prod, prod)` says prod and means it.
+// prod is a template, so it names the item it points at and there is no base
+// under an item for it to name instead. That is what costs the operators their
+// concrete halves: every parameter below is deduced, and deduction will not
+// convert a bare item into a prod. `link` does it instead, inside the body,
+// where overload resolution applies -- three operators, each written once.
 //
-// It is also the whole of the lifetime rule. prod holds an item by non-const
-// lvalue reference, so it can only be made from one that has a name:
-// `item("gone")*2.0` will not bind and does not compile. Everything else is
-// held by value, and there is nothing else to get wrong.
+// The lifetime rule is unchanged and still lives in one signature. prod holds
+// an item by non-const lvalue reference, so it can only be made from one that
+// has a name: `item("gone")*2.0` will not bind and does not compile.
+// Everything else is held by value, and there is nothing else to get wrong.
 // ---------------------------------------------------------------------------
 
-struct node;
-
-struct prod;
+template <class N> struct prod;
 template <class Left, class Right> struct sum;
 
 // Membership in the expression family. The two halves do two different jobs.
@@ -308,54 +313,69 @@ template <class Left, class Right> struct sum;
 // cannot be specialized and std::is_same cannot be specialized, so there is
 // nothing left for a stranger to add itself to.
 //
-// `T::an_input` is the invariant, and it is a member only because a concept may
-// not name itself -- `input<decltype(T::left)>` here is `'input' was not
-// declared in this scope`, because it is not, inside its own definition. So the
-// recursion goes out through sum, which carries `input<Left> && input<Right>`,
-// and comes back in here. It rides behind the identity check, so a stranger
-// declaring `an_input` gains nothing by it; take it away and the family is
-// still closed, but `sum<prod, int>` becomes an input.
+// A sum's halves are not checked, and used to be: it carried
+// `input<Left> && input<Right>` as a member, because a concept may not name
+// itself and the recursion had to go out through sum and come back. It is gone
+// because it guarded nothing reachable -- an operator is the only thing that
+// builds a sum, and an operator takes nothing else, so the only way to a bad
+// one is to write `sum<prod<X>, int>{...}` by hand. That now fails at the
+// charge instead of failing to be a type, which is the one place this file
+// takes the later error on purpose.
 //
-// Asking a type that has neither is not an error, it is a no -- substitution
-// failure in an atomic constraint means unsatisfied.
+// Asking a type that has none of them is not an error, it is a no --
+// substitution failure in an atomic constraint means unsatisfied. That is also
+// what lets `leaf` be the condition of an `if constexpr` further down: a sum
+// asked for its `what` answers no rather than failing to compile.
 //
-// This is what the deduced half of each operator takes, which is why none of
-// them will look at a bare item: the only way an item gets in is by being
-// converted to a prod, and that conversion wants a name.
+// This is what `link` takes by value, which is why an item cannot go that way:
+// an item is not an input, so the only overload left for it is the one wanting
+// a name, and a temporary has none.
 // What an offshore pump takes: an empty input list rather than no input list.
 // Declared by being defined -- prod and sum need forward declarations because
-// `input` names them and sum's own `an_input` names `input` straight back, and
-// nothing is in no such cycle. It mentions no one, and no one mentions it but
-// the concept on the next line.
+// the concepts below name them before they exist, and nothing is named by no
+// one but the line under it.
 struct nothing { void operator+=(double) {} };
 
-template <class T> concept input =
-	std::is_same_v<T, prod> || std::is_same_v<T, nothing> ||
-	(std::is_same_v<T, sum<decltype(T::left), decltype(T::right)>> && T::an_input);
+// Named, because a name is what an `if constexpr` can ask for -- and a concept
+// is the right kind of name: it cannot be specialised, so the family stays shut.
+// A variable template with a partial specialisation would answer the same
+// question and would let any later class specialise itself in.
+template <class T> concept leaf = std::is_same_v<T, prod<std::remove_reference_t<decltype(T::what)>>>;
+template <class T> concept tree = std::is_same_v<T, sum<decltype(T::left), decltype(T::right)>>;
 
-// Which classes are part of an expression. Nothing is, until it says so: each
-// of the three below declares its own membership on the line after its
-// definition, and a type that never declares it is an outsider by default
-// rather than by having been listed.
+template <class T> concept input = leaf<T> || tree<T> || std::is_same_v<T, nothing>;
 
-// A temporary, and that is the whole of the rule. It names no class, so there
-// is no list to have got wrong -- which was the point of writing it as a
-// constraint rather than as overloads. What an expression keeps of an item is a
-// reference, and a reference outlives a temporary, so no temporary may enter
-// one. A concept here is a named bool and nothing more: no requires-expression,
-// no requires-clause.
+// Declared here rather than above, so it can say what it takes. The default
+// is on the declaration, which is where a default template argument has to be
+// said once and only once.
+template <input Ins = nothing> struct item;
+
+// What an operator will look at: an input, or an item on its way to becoming
+// one. Stripped, so a deduced `A&&` satisfies it whichever way it was written.
+template <class T> concept an_item = std::is_same_v<T, item<decltype(T::ins)>>;
+
+template <class T> concept operand =
+	input<std::remove_cvref_t<T>> || an_item<std::remove_cvref_t<T>>;
+
+// Nothing declares itself part of an expression: membership is the identity
+// checks above and there is no member to carry, no tag and no table, so there
+// is nothing to add yourself to. Each concept here is a named bool and nothing
+// more -- no requires-expression, no requires-clause.
+
 // How much of what: a leaf, and the only place a reference is held. Its
-// constructor is the single door into an expression, and it wants a `node&` --
-// a non-const lvalue reference, which a temporary cannot bind to. That is the
-// whole of the lifetime rule, and it is a whitelist: not a list of ways in that
-// are forbidden, but one way in that is allowed.
-struct prod {
-	node& what;
+// constructor is the single door into an expression, and it wants an
+// `item<Ins>&` -- a non-const lvalue reference, which a temporary cannot bind
+// to. That is the whole of the lifetime rule, and it is a whitelist: not a list
+// of ways in that are forbidden, but one way in that is allowed.
+template <class N> struct prod {
+	N& what;
 	double amount;
 
-	prod(node& what, double amount = 1.0) : what(what), amount(amount) {}
+	prod(N& what, double amount = 1.0) : what(what), amount(amount) {}
 
-	void operator+=(double rate);   // needs item, so it is defined below
+	// In the class now: a template member is checked at instantiation, by which
+	// time item is complete, so this no longer has to wait until after it.
+	void operator+=(double rate) { what += rate * amount; }
 };
 
 // Two of them. It holds what is under it by value, because every operator
@@ -364,8 +384,6 @@ struct prod {
 template <class Left, class Right> struct sum {
 	// and a sum is one exactly when both halves are -- the invariant said where
 	// the compiler holds it rather than in a comment
-	static constexpr bool an_input = input<Left> && input<Right>;
-
 	Left  left;
 	Right right;
 
@@ -375,34 +393,45 @@ template <class Left, class Right> struct sum {
 	}
 };
 
-// Two of each, and the pairing is what refusing a bare item costs. The
-// concrete one names `prod`, which is a conversion target, so a bare item
-// becomes a leaf on the way in -- through `prod(node&)`, which is the only
-// door there is. The deduced one names `input`, so it takes a tree, and it will
-// not look at a bare item at all: an item satisfies nothing, declares nothing,
-// and inherits from nothing that does.
+// One of each, because nothing is converted at a parameter any more. A bare
+// item cannot reach a deduced operand, so it is not asked to: an operator takes
+// whatever it is given and hands it to `link`, and `link` is where the pairing
+// went -- one overload for an item, one for anything already a term.
 //
 // So a temporary cannot get in. Not because some way of getting in was deleted,
 // but because the way in is a reference bind that a temporary fails.
-inline sum<prod, prod> operator+(prod left, prod right) { return { left, right }; }
+//
+// THE DOOR, and it is still the only one. An item gets in as a non-const
+// lvalue or not at all; anything already a term passes through untouched.
+// std::forward is what makes that work from inside an operator: a temporary
+// arrives as an rvalue and neither overload will have it -- the first cannot
+// bind it, and the second wants an `input`, which an item is not.
+template <class Ins> prod<item<Ins>> link(item<Ins>& what) { return { what, 1.0 }; }
+template <input T>   T               link(T term)          { return term; }
 
-template <input L>
-sum<L, prod> operator+(L left, prod right) { return { left, right }; }
-
-inline prod operator*(prod term, double per_craft) {
-	return { term.what, term.amount * per_craft };
+// Three operators, each written once. The conversion that used to need a
+// second concrete overload happens inside the body now, where overload
+// resolution is allowed to do it and deduction is no longer in the way.
+template <operand A, operand B> auto operator+(A&& a, B&& b) {
+	return sum{ link(std::forward<A>(a)), link(std::forward<B>(b)) };
 }
 
-template <class L, class R>
-sum<L, R> operator*(sum<L, R> expr, double by) { return { expr.left * by, expr.right * by }; }
+// A leaf and a tree scale differently, so both are written here rather than
+// hidden behind one name on two classes. `leaf` is SFINAE-safe as an atomic
+// constraint -- asking a sum for its `what` is a no, not an error -- which a
+// bare is_same_v inside the if constexpr would not be.
+template <operand A> auto operator*(A&& a, double per_craft) {
+	auto term = link(std::forward<A>(a));
+	if constexpr (leaf<decltype(term)>) return prod{ term.what, term.amount * per_craft };
+	else                               return sum { term.left * per_craft, term.right * per_craft };
+}
 
 // a craft that makes several at a time, said once over the whole recipe rather
 // than once per term -- so a term keeps the number the wiki writes, 10 rather
 // than the 5 it works out to
-inline prod operator/(prod term, double makes) { return term * (1 / makes); }
-
-template <input E>
-auto operator/(E expr, double makes) { return expr * (1 / makes); }
+template <operand A> auto operator/(A&& a, double makes) {
+	return std::forward<A>(a) * (1 / makes);
+}
 
 // ---------------------------------------------------------------------------
 // An item is a name and a rate a second, and it is what every term charges. The
@@ -412,11 +441,23 @@ auto operator/(E expr, double makes) { return expr * (1 / makes); }
 // offshore pump is one of these and nothing more.
 // ---------------------------------------------------------------------------
 
-struct node {
+// ---------------------------------------------------------------------------
+// An item is a name, a rate and what one of it takes -- and Ins is constrained, so
+// `item<double>` is not a type that exists rather than a type that fails to
+// compile later. `nothing` is one of the things one can take and it is the
+// default, so every declaration in the graph is an item and there is one
+// destructor rather than two, which is the sweep
+// and the report both. By the time it runs, every recipe that wanted any of
+// this has already run and said so, and nothing below it has moved yet -- so
+// the total is final on the first line of the body, before the charge that
+// makes the inputs speak.
+// ---------------------------------------------------------------------------
+
+template <input Ins> struct item {
 	const char* name;
 	double      rate = 0.0;   // a second, and final only at destruction
+	Ins         ins;
 
-	explicit node(const char* name) : name(name) {}
 
 	// An item is a vertex in a graph whose destructor charges its inputs, so a
 	// copy of one is always a mistake -- and deleting it here, on the base every
@@ -426,7 +467,7 @@ struct node {
 	// term: the copy went into the tree, charged its own inputs, printed its own
 	// line, and left the real one at nothing, and it compiled every time. Now it
 	// does not compile, wherever it is written.
-	node(const node&) = delete;
+	item(const item&) = delete;
 
 	// Charged by whoever wants it, and it says so on the way in: `per_second`
 	// is what one recipe takes of this a second, which is one link, printed
@@ -441,35 +482,16 @@ struct node {
 		          << std::setw(13) << per_second << "\n";
 	}
 
-	// No destructor. A node is what a term points at and what a charge lands on;
-	// the sweep and the total belong to the item below, which is every
-	// declaration in the graph now that taking nothing is a thing one can take.
-};
-
-// ---------------------------------------------------------------------------
-// An item is a node with what one of it takes -- and Ins is constrained, so
-// `item<double>` is not a type that exists rather than a type that fails to
-// compile later. `nothing` is one of the things one can take and it is the
-// default, so every declaration in the graph is an item and there is one
-// destructor rather than two, which is the sweep
-// and the report both. By the time it runs, every recipe that wanted any of
-// this has already run and said so, and nothing below it has moved yet -- so
-// the total is final on the first line of the body, before the charge that
-// makes the inputs speak.
-// ---------------------------------------------------------------------------
-
-template <input Ins = nothing> struct item : node {
-	Ins ins;
 
 	// What one of it takes, and the parameter is Ins itself rather than
 	// something deduced -- so for an item<prod> it reads `prod`, concretely,
 	// and a bare item converts on the way in exactly as it does at an operator.
 	// One constructor covers both, because the guides have already decided
 	// which recipe this is by the time it is called.
-	item(const char* name, Ins ins) : node(name), ins(ins) {}
+	item(const char* name, Ins ins) : name(name), ins(ins) {}
 
 	// And one that takes nothing, which an offshore pump is written as.
-	explicit item(const char* name) : node(name), ins{} {}
+	explicit item(const char* name) : name(name), ins{} {}
 
 	// The whole algorithm, in the order it should be read. The total is final
 	// the instant this runs -- every recipe that wanted any of this is further
@@ -487,12 +509,12 @@ template <input Ins = nothing> struct item : node {
 	}
 };
 
-// One guide, and it is the concrete half again. The constructor above writes
-// the deduced half for itself -- `item(const char*, Ins) -> item<Ins>`,
-// constrained, so it deduces a written expression and refuses a bare item --
-// which leaves only the bare item to say out loud. The third is for the recipe
-// that takes nothing, written `item("offshore_pump")`: `nothing` is not
-// deducible from an argument that is not there, so it has to be said too.
+// One guide, and it is the only one that cannot be deduced. The constructor
+// above writes the other for itself -- `item(const char*, Ins) -> item<Ins>`,
+// constrained, so a written expression deduces its own type and `item<double>`
+// is not a type rather than a type that fails later. What is left to say out
+// loud is the recipe that takes nothing, written `item("offshore_pump")`:
+// `nothing` is not deducible from an argument that is not there.
 //
 // Neither takes `template` in front of it. `template <class A> f(x) -> T;` is a
 // guide; `template f(x) -> T;` without the angle brackets is an explicit
@@ -501,17 +523,15 @@ template <input Ins = nothing> struct item : node {
 // function template that matches the explicit instantiation -- and then the
 // guide is simply not there, so every `item("name")` in the graph fails to
 // deduce with no further explanation.
-item(const char*, prod) -> item<prod>;     // one input, written bare, converted
-item(const char*)       -> item<nothing>;  // and none at all
+item(const char*) -> item<nothing>;   // nothing is not deducible from nothing
 
 // A term charges what it is about, and that is all it does -- the two lines
 // of the sweep stay the two lines of the sweep. What it charges is the link,
 // so the item it lands on has the number it needs to say, and says it there.
 // A block therefore reads its heading first and then what it takes, because
 // ~item writes the heading and only then charges. The seed at the end of
-// factory() writes `research_unit.rate` and not the node, so the demand is not
+// factory() writes `research_unit.rate` and not the item, so the demand is not
 // a link and does not print as one.
-inline void prod::operator+=(double rate) { what += rate * amount; }
 
 // ---------------------------------------------------------------------------
 // The graph. In dependency order, because an input has to be written to be
@@ -560,7 +580,7 @@ static void factory() {
 	//
 	// Under each is its speed, on the link: a second of crafting takes 1/speed
 	// machine-seconds, which is where the two clocks meet. A machine at 1.00
-	// needs no second line -- its node already is the term.
+	// needs no second line -- its item already is the term.
 	auto assembly_1_impl       = item("assembly_1", electricity*(75.0 + 2.5));
 	auto assembly_1            = assembly_1_impl / 0.50;
 	auto assembly_2_impl       = item("assembly_2", electricity*(150.0 + 5.0));
