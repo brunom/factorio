@@ -25,7 +25,7 @@
 // products -- spelled as one:
 //
 //     auto offshore_pump = item("offshore_pump");
-//     auto steam = recipe("steam", (boiler + fuel*0.45 + water*6.0) / 60);
+//     auto steam = item("steam", (boiler + fuel*0.45 + water*6.0) / 60);
 //
 // prod is a leaf -- how much of what -- and sum<Left, Right> is two of them.
 // The `/` is a scaling rather than a node, so it needs no type of its own. The
@@ -45,10 +45,20 @@
 // so the invariant rides along behind the identity check, where declaring it
 // gains a stranger nothing.
 //
-// An item is not one of them. An `item` is a name and a rate, and a
-// `recipe<Ins>` is an item with what one of it takes on top -- so an offshore
-// pump, which takes nothing, is written as the item and not as a recipe with an
-// empty one. There is no empty one, and no type for it.
+// Neither is one of them. A `node` is a name and a rate and the thing a term
+// points at; an `item<Ins = nothing>` is a node with what one of it takes on
+// top, and every declaration in the graph is one -- an offshore pump takes
+// `nothing`, an empty input list rather than the absence of one. That costs a
+// type and an empty member and buys the whole of the algorithm in a single
+// destructor, which is what puts a heading above its own inputs instead of
+// below them.
+//
+// The two cannot be one class, and the reason is prod: a term holds a reference
+// to what it is about, and a reference has to name a type. `item<Ins>` is a
+// different type per recipe, so the thing a term points at has to be the part
+// that does not vary -- and erasing that difference instead is the virtual or
+// the std::function this file does not have. So `node` is not a layer, it is
+// the referent, and `item` is everything a declaration actually is.
 //
 // An item becomes an expression only by being converted to a prod. That is the
 // one door in, it is the only place a reference is taken, and it is why the
@@ -65,7 +75,7 @@
 //     void prod::operator+=(double rate) { what += rate * amount; }
 //
 // The report rides on them one call further down: `what += ...` arrives at
-// item::operator+=, which is where a link is both added and written.
+// node::operator+=, which is where a link is both added and written.
 //
 // The parentheses have to close before the `/`. Written
 // `(boiler + fuel*0.45 + water*6.0/60)` it compiles and divides the water
@@ -95,9 +105,10 @@
 // see through rather than a loop over an array of links. Nothing is
 // type-erased, nothing allocates, and a recipe's inputs live in the recipe.
 //
-// ONE RULE, AND IT IS A BUILD ERROR. An item is a node in a graph with a
+// ONE RULE, AND IT IS A BUILD ERROR. An item is a vertex in a graph with a
 // destructor that charges its inputs, so a copy of one is always a mistake, and
-// item says so: `item(const item&) = delete`. Every version of this file has
+// its base says so once for all of them: `node(const node&) = delete`, which
+// makes every item's own copy constructor implicitly deleted. Every version
 // been bitten by the same mistake -- a parameter that took an item by value
 // instead of converting it to a term, so the copy went into the tree, charged
 // its own inputs, printed its own line, and left the real one at nothing. Once
@@ -117,13 +128,13 @@
 //
 // It used to cost a `*1` on a recipe with a single input:
 //
-//     auto iron_ore = recipe("iron_ore", drill*1);
+//     auto iron_ore = item("iron_ore", drill*1);
 //
 // because with no operator in the expression to convert it, a bare item was
 // deduced and copied, and the delete turned that into an error at the line that
 // wrote it. But an error is not the right answer to a recipe that is written
 // correctly, and recipe gets it for one line. Its constructor takes `Ins`
-// itself, so for a recipe<prod> the parameter reads `prod`, concretely, and a
+// itself, so for an item<prod> the parameter reads `prod`, concretely, and a
 // bare item converts on the way in exactly as it does at an operator. The
 // constructor writes the deduced guide for itself; the concrete one is the
 // single guide left in the file. The `*1` is gone, and of the four guides that
@@ -136,7 +147,7 @@
 // reference to an item, so a reference to a temporary would outlive what it
 // points at -- and the only way an item enters an expression is
 //
-//     prod(item& what, double amount = 1.0)
+//     prod(node& what, double amount = 1.0)
 //
 // A temporary does not bind to a non-const lvalue reference, so there is no
 // such expression to build. Nothing is refused by name and there is no list of
@@ -147,9 +158,9 @@
 // by walking bases, and each operator could be written once instead of twice,
 // three functions where there are now six. But a by-value parameter then sliced
 // the item's base subobject out of a temporary, and stopping that took a
-// deleted constructor, and a deleted constructor is a list. `sum(item&&)`
+// deleted constructor, and a deleted constructor is a list. `sum(node&&)`
 // alone missed const rvalues -- that compiled, and the sanitizer called it a
-// stack-use-after-scope. `sum(const item&&)` beside it shut that spelling and
+// stack-use-after-scope. `sum(const node&&)` beside it shut that spelling and
 // left the same question open about the next. Constraining it instead
 // (`template <a_temporary T> sum(T&&) = delete`) answered the question without
 // a list, and was still a rule about what may not happen rather than about what
@@ -172,7 +183,7 @@
 //     collapsed to one. It is deliberately shut again, and the compiler says so
 //     in as many words: `'item' is not derived from 'sum<A, B>'`.
 //     DeductionRepro.cpp is that sentence in thirty lines.
-//   * prod holds an item by reference and every node above it holds what is
+//   * prod holds a node by reference and every term above it holds what is
 //     under it by value. That split is the lifetime rule and the whole of the
 //     safety: an item outlives every term about it, and an expression is a
 //     prvalue that would not, so only the leaf may point at anything. The
@@ -191,18 +202,19 @@
 // WHAT IS PRINTED, and where from. Two kinds of line, and only one of them
 // comes from a destructor.
 //
+//   * A total is written by ~item, first, because it is already final: every
+//     recipe that wanted any of this is further down the block and has been
+//     destroyed. Then the charge, which is the sweep and the rest of the line.
 //   * A link -- what one recipe takes of one thing a second -- is written by
-//     item::operator+= as the charge arrives, indented, once per asker.
-//   * A total is written by ~item, when there is nothing left to arrive.
-//     ~recipe is the sweep and a base is destroyed after the rest of the
-//     object, so by then every input has been charged and has said so.
+//     node::operator+= as that charge arrives, indented, once per asker.
 //
-// A block therefore reads its inputs first and its own total last, and that is
-// not a choice: nothing can print a heading for charges its own members have
-// not made yet. Products come first overall, because that is the order things
-// are destroyed in; read upwards for the order a factory is built.
+// So a block is a heading and then what it takes, the same order as the whole
+// listing: a product before what it is made of. Getting it needed the two
+// destructors merged into one, because a base goes after the members, so the
+// half holding the inputs always ran first. Products come first overall, that
+// being the order things are destroyed in; read upwards for the build order.
 //
-// Both lines are the item's and neither is the term's, which is what a recipe
+// Both lines are about the item and neither is the term's, which is what a recipe
 // column cost: an amount belongs to a term and an item has several, so no one
 // row can name a single machine and a single count. What the item does get is
 // the number the term charged it, and that number is the link -- so a share is
@@ -215,8 +227,9 @@
 //   * Nothing can be asked after a run, so the wiki's numbers cannot be
 //     static_asserts. They are in the comment at the end.
 //   * ostream::operator<< may throw and a destructor may not. A total is
-//     written from ~item and a link from a charge a destructor made, so either
-//     way a failure to write would call std::terminate rather than propagate.
+//     written from ~item and a link from a charge that ~item made, so
+//     either way a failure to write would call std::terminate rather than
+//     propagate.
 //   * The sweep and the report are one walk, so there is no quiet mode: a
 //     charge cannot be made without a line being written.
 //   * One graph answers for one product, and the graph is a block rather than
@@ -280,7 +293,7 @@ constexpr double lab_research_speed  = 0.00;   // +2.50 with all six levels
 // held by value, and there is nothing else to get wrong.
 // ---------------------------------------------------------------------------
 
-struct item;
+struct node;
 
 struct prod;
 template <class Left, class Right> struct sum;
@@ -309,8 +322,15 @@ template <class Left, class Right> struct sum;
 // This is what the deduced half of each operator takes, which is why none of
 // them will look at a bare item: the only way an item gets in is by being
 // converted to a prod, and that conversion wants a name.
+// What an offshore pump takes: an empty input list rather than no input list.
+// Declared by being defined -- prod and sum need forward declarations because
+// `input` names them and sum's own `an_input` names `input` straight back, and
+// nothing is in no such cycle. It mentions no one, and no one mentions it but
+// the concept on the next line.
+struct nothing { void operator+=(double) {} };
+
 template <class T> concept input =
-	std::is_same_v<T, prod> ||
+	std::is_same_v<T, prod> || std::is_same_v<T, nothing> ||
 	(std::is_same_v<T, sum<decltype(T::left), decltype(T::right)>> && T::an_input);
 
 // Which classes are part of an expression. Nothing is, until it says so: each
@@ -325,15 +345,15 @@ template <class T> concept input =
 // one. A concept here is a named bool and nothing more: no requires-expression,
 // no requires-clause.
 // How much of what: a leaf, and the only place a reference is held. Its
-// constructor is the single door into an expression, and it wants a `item&` --
+// constructor is the single door into an expression, and it wants a `node&` --
 // a non-const lvalue reference, which a temporary cannot bind to. That is the
 // whole of the lifetime rule, and it is a whitelist: not a list of ways in that
 // are forbidden, but one way in that is allowed.
 struct prod {
-	item& what;
+	node& what;
 	double amount;
 
-	prod(item& what, double amount = 1.0) : what(what), amount(amount) {}
+	prod(node& what, double amount = 1.0) : what(what), amount(amount) {}
 
 	void operator+=(double rate);   // needs item, so it is defined below
 };
@@ -357,7 +377,7 @@ template <class Left, class Right> struct sum {
 
 // Two of each, and the pairing is what refusing a bare item costs. The
 // concrete one names `prod`, which is a conversion target, so a bare item
-// becomes a leaf on the way in -- through `prod(item&)`, which is the only
+// becomes a leaf on the way in -- through `prod(node&)`, which is the only
 // door there is. The deduced one names `input`, so it takes a tree, and it will
 // not look at a bare item at all: an item satisfies nothing, declares nothing,
 // and inherits from nothing that does.
@@ -392,26 +412,27 @@ auto operator/(E expr, double makes) { return expr * (1 / makes); }
 // offshore pump is one of these and nothing more.
 // ---------------------------------------------------------------------------
 
-struct item {
+struct node {
 	const char* name;
 	double      rate = 0.0;   // a second, and final only at destruction
 
-	explicit item(const char* name) : name(name) {}
+	explicit node(const char* name) : name(name) {}
 
-	// An item is a node in a graph with a destructor that charges its inputs,
-	// so a copy of one is always a mistake -- and saying so once here is what
-	// closes the whole family of them. Every version of this file has been bitten
+	// An item is a vertex in a graph whose destructor charges its inputs, so a
+	// copy of one is always a mistake -- and deleting it here, on the base every
+	// item has, closes the whole family of them at once. Every version of this
+	// file has been bitten
 	// by a parameter that took an item by value instead of converting it to a
 	// term: the copy went into the tree, charged its own inputs, printed its own
 	// line, and left the real one at nothing, and it compiled every time. Now it
 	// does not compile, wherever it is written.
-	item(const item&) = delete;
+	node(const node&) = delete;
 
 	// Charged by whoever wants it, and it says so on the way in: `per_second`
-	// is what one recipe takes of this a second, which is one link. Both of an
-	// item's lines are written here, the share as it arrives and the total when
-	// there is nothing left to arrive -- so an item several recipes ask for
-	// says each share once per asker and its total once, at the end.
+	// is what one recipe takes of this a second, which is one link, printed
+	// under the heading its charger has just written. An item several recipes
+	// ask for therefore says its share once per asker, each time under the one
+	// asking; its total is said once, by its own destructor, further down.
 	void operator+=(double per_second) {
 		if (per_second == 0.0) return;   // nobody asked, so there is no link
 		rate += per_second;
@@ -420,57 +441,58 @@ struct item {
 		          << std::setw(13) << per_second << "\n";
 	}
 
-	// The total, and it comes last: a base is destroyed after the rest of the
-	// object, so by the time this runs the recipe below has charged -- and
-	// printed -- every input, and an item with no recipe under it, which is the
-	// whole of an offshore pump, still gets here.
+	// No destructor. A node is what a term points at and what a charge lands on;
+	// the sweep and the total belong to the item below, which is every
+	// declaration in the graph now that taking nothing is a thing one can take.
+};
+
+// ---------------------------------------------------------------------------
+// An item is a node with what one of it takes -- and Ins is constrained, so
+// `item<double>` is not a type that exists rather than a type that fails to
+// compile later. `nothing` is one of the things one can take and it is the
+// default, so every declaration in the graph is an item and there is one
+// destructor rather than two, which is the sweep
+// and the report both. By the time it runs, every recipe that wanted any of
+// this has already run and said so, and nothing below it has moved yet -- so
+// the total is final on the first line of the body, before the charge that
+// makes the inputs speak.
+// ---------------------------------------------------------------------------
+
+template <input Ins = nothing> struct item : node {
+	Ins ins;
+
+	// What one of it takes, and the parameter is Ins itself rather than
+	// something deduced -- so for an item<prod> it reads `prod`, concretely,
+	// and a bare item converts on the way in exactly as it does at an operator.
+	// One constructor covers both, because the guides have already decided
+	// which recipe this is by the time it is called.
+	item(const char* name, Ins ins) : node(name), ins(ins) {}
+
+	// And one that takes nothing, which an offshore pump is written as.
+	explicit item(const char* name) : node(name), ins{} {}
+
+	// The whole algorithm, in the order it should be read. The total is final
+	// the instant this runs -- every recipe that wanted any of this is further
+	// down the block and has already been destroyed -- so it is written first,
+	// and then the charge, which is what makes each input say its own link
+	// underneath it. Two destructors could not do this: a base goes after the
+	// members, so the half holding the inputs always ran first and the heading
+	// always came last. Merging them is what buys the order.
 	~item() {
 		if (rate == 0.0) return;    // nobody asked for it
 		std::cout << "  " << std::left  << std::setw(20) << name
 		          << std::right << std::fixed << std::setprecision(4)
 		          << std::setw(13) << rate << "\n";
+		ins += rate;
 	}
 };
 
-// A term charges what it is about, and that is all it does -- the two lines
-// of the sweep stay the two lines of the sweep. What it charges is the link,
-// so the item it lands on has the number it needs to say, and says it there.
-// A block therefore reads inputs first and total last, which is not a choice:
-// a base is destroyed after its members, so nothing can print a heading for
-// charges its own members have not made yet. The seed at the end of factory()
-// writes `research_unit.rate` and not the item, so the demand is not a link
-// and does not print as one.
-inline void prod::operator+=(double rate) { what += rate * amount; }
-
-// ---------------------------------------------------------------------------
-// A recipe is an item with what one of it takes -- and Ins is constrained, so
-// `recipe<double>` is not a type that exists rather than a type that fails to
-// compile later. Its two destructors are the sweep and the report, in that
-// order,
-// because a base goes after the rest of the object -- by the time either runs,
-// every recipe that wanted any of this has already run and said so, and
-// nothing below it has moved yet.
-// ---------------------------------------------------------------------------
-
-template <input Ins> struct recipe : item {
-	Ins ins;
-
-	// What one of it takes, and the parameter is Ins itself rather than
-	// something deduced -- so for a recipe<prod> it reads `prod`, concretely,
-	// and a bare item converts on the way in exactly as it does at an operator.
-	// One constructor covers both, because the guides have already decided
-	// which recipe this is by the time it is called.
-	recipe(const char* name, Ins ins) : item(name), ins(ins) {}
-
-	~recipe() { ins += rate; }
-};
-
 // One guide, and it is the concrete half again. The constructor above writes
-// the deduced half for itself -- `recipe(const char*, Ins) -> recipe<Ins>`,
+// the deduced half for itself -- `item(const char*, Ins) -> item<Ins>`,
 // constrained, so it deduces a written expression and refuses a bare item --
-// which leaves only the bare item to say out loud. There is no third for the
-// empty recipe, because an item with no inputs is not a recipe at all: it is
-// written `item("offshore_pump")` and its class is the base.
+// which leaves only the bare item to say out loud. The third is for the recipe
+// that takes nothing, written `item("offshore_pump")`: `nothing` is not
+// deducible from an argument that is not there, so it has to be said too.
 //
 // Neither takes `template` in front of it. `template <class A> f(x) -> T;` is a
 // guide; `template f(x) -> T;` without the angle brackets is an explicit
@@ -479,7 +501,17 @@ template <input Ins> struct recipe : item {
 // function template that matches the explicit instantiation -- and then the
 // guide is simply not there, so every `item("name")` in the graph fails to
 // deduce with no further explanation.
-recipe(const char*, prod) -> recipe<prod>;   // one input, written bare, converted
+item(const char*, prod) -> item<prod>;     // one input, written bare, converted
+item(const char*)       -> item<nothing>;  // and none at all
+
+// A term charges what it is about, and that is all it does -- the two lines
+// of the sweep stay the two lines of the sweep. What it charges is the link,
+// so the item it lands on has the number it needs to say, and says it there.
+// A block therefore reads its heading first and then what it takes, because
+// ~item writes the heading and only then charges. The seed at the end of
+// factory() writes `research_unit.rate` and not the node, so the demand is not
+// a link and does not print as one.
+inline void prod::operator+=(double rate) { what += rate * amount; }
 
 // ---------------------------------------------------------------------------
 // The graph. In dependency order, because an input has to be written to be
@@ -502,23 +534,23 @@ static void factory() {
 	auto burner_drill_impl = item("burner_drill");
 	auto burner_drill      = burner_drill_impl / 0.2125;
 
-	auto water = recipe("water", offshore_pump/1200);
-	auto fuel  = recipe("fuel",  burner_drill);      // coal, off the power grid
+	auto water = item("water", offshore_pump/1200);
+	auto fuel  = item("fuel",  burner_drill);      // coal, off the power grid
 
 	// a boiler turns 1.8 MW of fuel into 60 steam a second, and coal is 4 MJ,
 	// so 0.45 coal. 1.1 took 60 water for that; 2.0.7 made the ratio 1:10
-	auto steam = recipe("steam", (boiler + fuel*0.45 + water*6.0) / 60);
+	auto steam = item("steam", (boiler + fuel*0.45 + water*6.0) / 60);
 
 	// a steam engine turns 30 steam a second into 900 kW. So a kilowatt is a
 	// coal every 4 MJ and a water every 300, from the far side of the ladder.
-	auto electricity = recipe("electricity", (steam_engine + steam*30.0) / 900);
+	auto electricity = item("electricity", (steam_engine + steam*30.0) / 900);
 
 	// The machines that burn fuel: what one second of one costs is its
 	// consumption over coal's 4 MJ. The fuel is the one the boilers take, mined
 	// by a burner drill, which is what keeps a furnace out of the electric
 	// drill's chain and so out of a cycle.
-	auto stone_furnace      = recipe("stone_furnace", fuel*(90.0 / 4000.0));
-	auto steel_furnace_impl = recipe("steel_furnace", fuel*(90.0 / 4000.0));
+	auto stone_furnace      = item("stone_furnace", fuel*(90.0 / 4000.0));
+	auto steel_furnace_impl = item("steel_furnace", fuel*(90.0 / 4000.0));
 	auto steel_furnace      = steel_furnace_impl / 2.00;
 
 	// The machines that take power. The wiki gives two numbers and they add:
@@ -529,24 +561,24 @@ static void factory() {
 	// Under each is its speed, on the link: a second of crafting takes 1/speed
 	// machine-seconds, which is where the two clocks meet. A machine at 1.00
 	// needs no second line -- its node already is the term.
-	auto assembly_1_impl       = recipe("assembly_1", electricity*(75.0 + 2.5));
+	auto assembly_1_impl       = item("assembly_1", electricity*(75.0 + 2.5));
 	auto assembly_1            = assembly_1_impl / 0.50;
-	auto assembly_2_impl       = recipe("assembly_2", electricity*(150.0 + 5.0));
+	auto assembly_2_impl       = item("assembly_2", electricity*(150.0 + 5.0));
 	auto assembly_2            = assembly_2_impl / 0.75;
-	auto assembly_3_impl       = recipe("assembly_3", electricity*(375.0 + 12.5));
+	auto assembly_3_impl       = item("assembly_3", electricity*(375.0 + 12.5));
 	auto assembly_3            = assembly_3_impl / 1.25;
-	auto electric_furnace_impl = recipe("electric_furnace", electricity*(180.0 + 6.0));
+	auto electric_furnace_impl = item("electric_furnace", electricity*(180.0 + 6.0));
 	auto electric_furnace      = electric_furnace_impl / 2.00;
-	auto chemical_plant        = recipe("chemical_plant", electricity*(210.0 + 7.0));
-	auto refinery              = recipe("refinery", electricity*(420.0 + 14.0));
+	auto chemical_plant        = item("chemical_plant", electricity*(210.0 + 7.0));
+	auto refinery              = item("refinery", electricity*(420.0 + 14.0));
 	// mining speed 1 times the patch's yield: a 538% patch is 5.38, and the
 	// recipe below is 10 crude a second, which is what 100% yields. The dials
 	// are speeds too, so these three keep a term even at a base figure of 1.00.
-	auto pumpjack_impl         = recipe("pumpjack", electricity*(90.0 + 3.0));
+	auto pumpjack_impl         = item("pumpjack", electricity*(90.0 + 3.0));
 	auto pumpjack              = pumpjack_impl / (1.00 * (1 + mining_productivity));
-	auto electric_drill_impl   = recipe("electric_drill", electricity*(90.0 + 3.0));
+	auto electric_drill_impl   = item("electric_drill", electricity*(90.0 + 3.0));
 	auto electric_drill        = electric_drill_impl / (0.50 * (1 + mining_productivity));
-	auto lab_impl              = recipe("lab", electricity*(60.0 + 2.0));
+	auto lab_impl              = item("lab", electricity*(60.0 + 2.0));
 	auto lab                   = lab_impl / (1.00 * (1 + lab_research_speed));
 
 	// What is built. References, so they are not objects and take no part in
@@ -557,69 +589,69 @@ static void factory() {
 	auto& drill    = electric_drill;
 
 	// ore patches: mining time is 1 second for all four vanilla ores
-	auto iron_ore   = recipe("iron_ore",   drill);
-	auto copper_ore = recipe("copper_ore", drill);
-	auto coal       = recipe("coal",       drill);
-	auto stone      = recipe("stone",      drill);
-	auto crude_oil  = recipe("crude_oil",  pumpjack / 10);
+	auto iron_ore   = item("iron_ore",   drill);
+	auto copper_ore = item("copper_ore", drill);
+	auto coal       = item("coal",       drill);
+	auto stone      = item("stone",      drill);
+	auto crude_oil  = item("crude_oil",  pumpjack / 10);
 
 	// smelting
-	auto iron_plate   = recipe("iron_plate",   furnace*3.2  + iron_ore);
-	auto copper_plate = recipe("copper_plate", furnace*3.2  + copper_ore);
-	auto steel_plate  = recipe("steel_plate",  furnace*16.0 + iron_plate*5.0);
-	auto stone_brick  = recipe("stone_brick",  furnace*3.2  + stone*2.0);
+	auto iron_plate   = item("iron_plate",   furnace*3.2  + iron_ore);
+	auto copper_plate = item("copper_plate", furnace*3.2  + copper_ore);
+	auto steel_plate  = item("steel_plate",  furnace*16.0 + iron_plate*5.0);
+	auto stone_brick  = item("stone_brick",  furnace*3.2  + stone*2.0);
 
 	// oil
-	auto petroleum_gas = recipe("petroleum_gas",
+	auto petroleum_gas = item("petroleum_gas",
 	                          (refinery*5.0 + crude_oil*100.0) / 45);
-	auto plastic_bar   = recipe("plastic_bar",
+	auto plastic_bar   = item("plastic_bar",
 	                          (chemical_plant + coal + petroleum_gas*20.0) / 2);
-	auto sulfur        = recipe("sulfur",
+	auto sulfur        = item("sulfur",
 	                          (chemical_plant + water*30.0 + petroleum_gas*30.0) / 2);
 
 	// intermediates
-	auto iron_gear    = recipe("iron_gear", assembly*0.5 + iron_plate*2.0);
-	auto copper_cable = recipe("copper_cable", (assembly*0.5 + copper_plate) / 2);
-	auto electronic_circuit = recipe("electronic_circuit",
+	auto iron_gear    = item("iron_gear", assembly*0.5 + iron_plate*2.0);
+	auto copper_cable = item("copper_cable", (assembly*0.5 + copper_plate) / 2);
+	auto electronic_circuit = item("electronic_circuit",
 	                               assembly*0.5 + iron_plate + copper_cable*3.0);
-	auto pipe           = recipe("pipe", assembly*0.5 + iron_plate);
-	auto transport_belt = recipe("transport_belt",
+	auto pipe           = item("pipe", assembly*0.5 + iron_plate);
+	auto transport_belt = item("transport_belt",
 	                           (assembly*0.5 + iron_gear + iron_plate) / 2);
-	auto inserter       = recipe("inserter",
+	auto inserter       = item("inserter",
 	                           assembly*0.5 + electronic_circuit + iron_gear + iron_plate);
-	auto advanced_circuit = recipe("advanced_circuit",
+	auto advanced_circuit = item("advanced_circuit",
 	                             assembly*6.0 + plastic_bar*2.0
 	                             + electronic_circuit*2.0 + copper_cable*4.0);
-	auto engine_unit    = recipe("engine_unit",
+	auto engine_unit    = item("engine_unit",
 	                           assembly*10.0 + steel_plate + iron_gear + pipe*2.0);
 
 	// military. A wall is five bricks, and a brick is two stone.
-	auto wall        = recipe("wall", assembly*0.5 + stone_brick*5.0);
-	auto firearm_mag = recipe("firearm_mag", assembly + iron_plate*4.0);
+	auto wall        = item("wall", assembly*0.5 + stone_brick*5.0);
+	auto firearm_mag = item("firearm_mag", assembly + iron_plate*4.0);
 	// 2.0.46 made this 2 at a time in 6s from 2 mags and 2 copper; in 1.1 it is
 	// assembly*3.0 + firearm_mag + copper_plate*5.0 + steel_plate, one at a time
-	auto piercing_mag = recipe("piercing_mag",
+	auto piercing_mag = item("piercing_mag",
 	                         (assembly*6.0 + firearm_mag*2.0 + copper_plate*2.0
 	                          + steel_plate) / 2);
-	auto grenade      = recipe("grenade",
+	auto grenade      = item("grenade",
 	                         assembly*8.0 + coal*10.0 + iron_plate*5.0);  // 10 coal
 
 	// science
-	auto automation_pack = recipe("automation_pack",
+	auto automation_pack = item("automation_pack",
 	                            assembly*5.0 + copper_plate + iron_gear);
-	auto logistic_pack   = recipe("logistic_pack",
+	auto logistic_pack   = item("logistic_pack",
 	                            assembly*6.0 + inserter + transport_belt);
-	auto chemical_pack   = recipe("chemical_pack",
+	auto chemical_pack   = item("chemical_pack",
 	                            (assembly*24.0 + advanced_circuit*3.0
 	                             + engine_unit*2.0 + sulfur) / 2);
-	auto military_pack   = recipe("military_pack",
+	auto military_pack   = item("military_pack",
 	                            (assembly*10.0 + grenade + piercing_mag
 	                             + wall*2.0) / 2);
 
 	// One research unit is one of each pack the technology asks for, taking the
 	// technology's time. Drop the packs your current research does not need and
 	// the labs and their power fall out of the same graph.
-	auto research_unit = recipe("research_unit",
+	auto research_unit = item("research_unit",
 		lab*30.0
 		//+ automation_pack 
 		//+ logistic_pack	                          
