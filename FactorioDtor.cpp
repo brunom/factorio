@@ -266,6 +266,7 @@
 //
 // Recipes are vanilla Factorio 2.0 (no Space Age), no modules anywhere. Where
 // 1.1 differs it is noted at the recipe.
+#include <concepts>
 #include <iomanip>
 #include <iostream>
 #include <type_traits>
@@ -280,8 +281,8 @@
 // so it multiplies the drill's speed.
 // ---------------------------------------------------------------------------
 
-constexpr double mining_productivity = 0.00;   // +0.10 a level, no cap
-constexpr double lab_research_speed  = 0.00;   // +2.50 with all six levels
+constexpr double mining_productivity = 0.20;   // +0.10 a level, no cap
+constexpr double lab_research_speed = 0.50;   // +2.50 with all six levels
 
 // ---------------------------------------------------------------------------
 // What one craft takes is an expression, and there are three shapes of one: a
@@ -299,9 +300,6 @@ constexpr double lab_research_speed  = 0.00;   // +2.50 with all six levels
 // has a name: `item("gone")*2.0` will not bind and does not compile.
 // Everything else is held by value, and there is nothing else to get wrong.
 // ---------------------------------------------------------------------------
-
-template <class N> struct prod;
-template <class Left, class Right> struct sum;
 
 // Membership in the expression family. The two halves do two different jobs.
 //
@@ -334,29 +332,34 @@ template <class Left, class Right> struct sum;
 // Declared by being defined -- prod and sum need forward declarations because
 // the concepts below name them before they exist, and nothing is named by no
 // one but the line under it.
-struct nothing { void operator+=(double) {} };
+struct operand {};
+
+// One concept where there were four, and it is the only shape that can
+// constrain item's own parameter: a constraint may not mention the thing it
+// constrains, so `an_item` never could, and while item was constrained the
+// concepts could not be collapsed at all. A marker names no class template, so
+// both problems go at once -- and so does the forward-declaration block, since
+// nothing here has to be declared before it is used.
+//
+// The price, and it is paid on purpose: membership is declared rather than had.
+// A stranger may write `struct x : operand {}` and join the family, which
+// identity would not have allowed. It can be shut -- a private default
+// constructor with prod, sum, item and nothing as friends, plus `final` on all
+// four to stop a second-hand join through prod -- at the cost of the two
+// aggregates and a forward declaration of operand. Not taken.
+template <class T> concept an_operand = std::derived_from<std::remove_cvref_t<T>, operand>;
+
+struct nothing : operand { void operator+=(double) {} };
 
 // Named, because a name is what an `if constexpr` can ask for -- and a concept
 // is the right kind of name: it cannot be specialised, so the family stays shut.
 // A variable template with a partial specialisation would answer the same
 // question and would let any later class specialise itself in.
-template <class T> concept leaf = std::is_same_v<T, prod<std::remove_reference_t<decltype(T::what)>>>;
-template <class T> concept tree = std::is_same_v<T, sum<decltype(T::left), decltype(T::right)>>;
-
-template <class T> concept input = leaf<T> || tree<T> || std::is_same_v<T, nothing>;
-
 // Declared here rather than above, so it can say what it takes. The default
 // is on the declaration, which is where a default template argument has to be
 // said once and only once.
-template <input Ins = nothing> struct item;
-
 // What an operator will look at: an input, or an item on its way to becoming
 // one. Stripped, so a deduced `A&&` satisfies it whichever way it was written.
-template <class T> concept an_item = std::is_same_v<T, item<decltype(T::ins)>>;
-
-template <class T> concept operand =
-	input<std::remove_cvref_t<T>> || an_item<std::remove_cvref_t<T>>;
-
 // Nothing declares itself part of an expression: membership is the identity
 // checks above and there is no member to carry, no tag and no table, so there
 // is nothing to add yourself to. Each concept here is a named bool and nothing
@@ -367,11 +370,9 @@ template <class T> concept operand =
 // `item<Ins>&` -- a non-const lvalue reference, which a temporary cannot bind
 // to. That is the whole of the lifetime rule, and it is a whitelist: not a list
 // of ways in that are forbidden, but one way in that is allowed.
-template <class N> struct prod {
-	N& what;
+template <class T> struct prod : operand {
+	T what;
 	double amount;
-
-	prod(N& what, double amount = 1.0) : what(what), amount(amount) {}
 
 	// In the class now: a template member is checked at instantiation, by which
 	// time item is complete, so this no longer has to wait until after it.
@@ -381,14 +382,14 @@ template <class N> struct prod {
 // Two of them. It holds what is under it by value, because every operator
 // returns a prvalue and a reference would bind to a temporary that is gone by
 // the next statement. There is no node for the `/`: it is a scaling.
-template <class Left, class Right> struct sum {
+template <class Left, class Right> struct sum : operand {
 	// and a sum is one exactly when both halves are -- the invariant said where
 	// the compiler holds it rather than in a comment
 	Left  left;
 	Right right;
 
 	void operator+=(double rate) {
-		left  += rate;   // left to right, so a recipe reads as written
+		left += rate;   // left to right, so a recipe reads as written
 		right += rate;
 	}
 };
@@ -406,30 +407,26 @@ template <class Left, class Right> struct sum {
 // std::forward is what makes that work from inside an operator: a temporary
 // arrives as an rvalue and neither overload will have it -- the first cannot
 // bind it, and the second wants an `input`, which an item is not.
-template <class Ins> prod<item<Ins>> link(item<Ins>& what) { return { what, 1.0 }; }
-template <input T>   T               link(T term)          { return term; }
 
 // Three operators, each written once. The conversion that used to need a
 // second concrete overload happens inside the body now, where overload
 // resolution is allowed to do it and deduction is no longer in the way.
-template <operand A, operand B> auto operator+(A&& a, B&& b) {
-	return sum{ link(std::forward<A>(a)), link(std::forward<B>(b)) };
+template <an_operand A, an_operand B> auto operator+(A&& a, B&& b) {
+	return sum<A, B>{ {}, std::forward<A>(a), std::forward<B>(b) };
 }
 
 // A leaf and a tree scale differently, so both are written here rather than
 // hidden behind one name on two classes. `leaf` is SFINAE-safe as an atomic
 // constraint -- asking a sum for its `what` is a no, not an error -- which a
 // bare is_same_v inside the if constexpr would not be.
-template <operand A> auto operator*(A&& a, double per_craft) {
-	auto term = link(std::forward<A>(a));
-	if constexpr (leaf<decltype(term)>) return prod{ term.what, term.amount * per_craft };
-	else                               return sum { term.left * per_craft, term.right * per_craft };
+template <an_operand A> auto operator*(A&& a, double amount) {
+	return prod<A>{ {}, std::forward<A>(a), amount };
 }
 
 // a craft that makes several at a time, said once over the whole recipe rather
 // than once per term -- so a term keeps the number the wiki writes, 10 rather
 // than the 5 it works out to
-template <operand A> auto operator/(A&& a, double makes) {
+template <an_operand A> auto operator/(A&& a, double makes) {
 	return std::forward<A>(a) * (1 / makes);
 }
 
@@ -453,7 +450,7 @@ template <operand A> auto operator/(A&& a, double makes) {
 // makes the inputs speak.
 // ---------------------------------------------------------------------------
 
-template <input Ins> struct item {
+template <an_operand Ins = nothing> struct item : operand {
 	const char* name;
 	double      rate = 0.0;   // a second, and final only at destruction
 	Ins         ins;
@@ -469,6 +466,15 @@ template <input Ins> struct item {
 	// does not compile, wherever it is written.
 	item(const item&) = delete;
 
+	// A temporary is no longer refused, it is owned: an rvalue deduces to `item`
+	// by value and lives inside the prod that took it, which is what lets a
+	// machine be written on one line. The copy stays deleted, so `auto dup =
+	// iron_plate;` is still the build error it has always been -- a move only
+	// fires for a temporary, and a temporary is a fresh vertex nobody references.
+	// The husk keeps ~item's `rate == 0.0` gate, so it says nothing; that gate is
+	// load-bearing now rather than a shortcut.
+	item(item&& o) = default;
+
 	// Charged by whoever wants it, and it says so on the way in: `per_second`
 	// is what one recipe takes of this a second, which is one link, printed
 	// under the heading its charger has just written. An item several recipes
@@ -477,9 +483,9 @@ template <input Ins> struct item {
 	void operator+=(double per_second) {
 		if (per_second == 0.0) return;   // nobody asked, so there is no link
 		rate += per_second;
-		std::cout << "    " << std::left  << std::setw(18) << name
-		          << std::right << std::fixed << std::setprecision(4)
-		          << std::setw(13) << per_second << "\n";
+		std::cout << "  " << std::left << std::setw(18) << name
+			<< std::right << std::fixed << std::setprecision(4)
+			<< std::setw(13) << per_second << "\n";
 	}
 
 
@@ -488,7 +494,7 @@ template <input Ins> struct item {
 	// and a bare item converts on the way in exactly as it does at an operator.
 	// One constructor covers both, because the guides have already decided
 	// which recipe this is by the time it is called.
-	item(const char* name, Ins ins) : name(name), ins(ins) {}
+	template <an_operand I> item(const char* name, I&& ins) : name(name), ins(std::forward<I>(ins)) {}
 
 	// And one that takes nothing, which an offshore pump is written as.
 	explicit item(const char* name) : name(name), ins{} {}
@@ -502,9 +508,9 @@ template <input Ins> struct item {
 	// always came last. Merging them is what buys the order.
 	~item() {
 		if (rate == 0.0) return;    // nobody asked for it
-		std::cout << "  " << std::left  << std::setw(20) << name
-		          << std::right << std::fixed << std::setprecision(4)
-		          << std::setw(13) << rate << "\n";
+		std::cout << std::left << std::setw(20) << name
+			<< std::right << std::fixed << std::setprecision(4)
+			<< std::setw(13) << rate << "\n";
 		ins += rate;
 	}
 };
@@ -523,7 +529,8 @@ template <input Ins> struct item {
 // function template that matches the explicit instantiation -- and then the
 // guide is simply not there, so every `item("name")` in the graph fails to
 // deduce with no further explanation.
-item(const char*) -> item<nothing>;   // nothing is not deducible from nothing
+template <an_operand I> item(const char*, I&&) -> item<I>;
+item(const char*)->item<nothing>;   // nothing is not deducible from nothing
 
 // A term charges what it is about, and that is all it does -- the two lines
 // of the sweep stay the two lines of the sweep. What it charges is the link,
@@ -541,37 +548,37 @@ item(const char*) -> item<nothing>;   // nothing is not deducible from nothing
 // ---------------------------------------------------------------------------
 
 static void factory() {
+
+
 	// The power plant. None of these four needs electricity: a boiler and a
 	// burner drill burn fuel, a steam engine makes the power, an offshore pump
 	// needs nothing at all -- which is what lets a kilowatt have a price.
 	auto offshore_pump = item("offshore_pump");
-	auto boiler        = item("boiler");
-	auto steam_engine  = item("steam_engine");
+	auto boiler = item("boiler");
+	auto steam_engine = item("steam_engine");
 	// mining speed 0.25 less the 0.0375 a second it burns of what it mines, so
 	// 0.2125 -- and a leaf has no inputs to divide it into, which is the whole
 	// argument for the divisor being on the link: a machine with no recipe of
 	// its own still has a speed, and this is where it says it.
-	auto burner_drill_impl = item("burner_drill");
-	auto burner_drill      = burner_drill_impl / 0.2125;
+	auto burner_drill = item("burner_drill") / 0.2125;
 
-	auto water = item("water", offshore_pump/1200);
-	auto fuel  = item("fuel",  burner_drill);      // coal, off the power grid
+	auto water = item("water", offshore_pump / 1200);
+	auto fuel = item("fuel", burner_drill);      // coal, off the power grid
 
 	// a boiler turns 1.8 MW of fuel into 60 steam a second, and coal is 4 MJ,
 	// so 0.45 coal. 1.1 took 60 water for that; 2.0.7 made the ratio 1:10
-	auto steam = item("steam", (boiler + fuel*0.45 + water*6.0) / 60);
+	auto steam = item("steam", (boiler + fuel * 0.45 + water * 6.0) / 60);
 
 	// a steam engine turns 30 steam a second into 900 kW. So a kilowatt is a
 	// coal every 4 MJ and a water every 300, from the far side of the ladder.
-	auto electricity = item("electricity", (steam_engine + steam*30.0) / 900);
+	auto electricity = item("electricity", (steam_engine + steam * 30.0) / 900);
 
 	// The machines that burn fuel: what one second of one costs is its
 	// consumption over coal's 4 MJ. The fuel is the one the boilers take, mined
 	// by a burner drill, which is what keeps a furnace out of the electric
 	// drill's chain and so out of a cycle.
-	auto stone_furnace      = item("stone_furnace", fuel*(90.0 / 4000.0));
-	auto steel_furnace_impl = item("steel_furnace", fuel*(90.0 / 4000.0));
-	auto steel_furnace      = steel_furnace_impl / 2.00;
+	auto stone_furnace = item("stone_furnace", fuel * (90.0 / 4000.0));
+	auto steel_furnace = item("steel_furnace", fuel * (90.0 / 4000.0)) / 2.00;
 
 	// The machines that take power. The wiki gives two numbers and they add:
 	// energy consumption while working, then drain, which is charged whether it
@@ -581,105 +588,98 @@ static void factory() {
 	// Under each is its speed, on the link: a second of crafting takes 1/speed
 	// machine-seconds, which is where the two clocks meet. A machine at 1.00
 	// needs no second line -- its item already is the term.
-	auto assembly_1_impl       = item("assembly_1", electricity*(75.0 + 2.5));
-	auto assembly_1            = assembly_1_impl / 0.50;
-	auto assembly_2_impl       = item("assembly_2", electricity*(150.0 + 5.0));
-	auto assembly_2            = assembly_2_impl / 0.75;
-	auto assembly_3_impl       = item("assembly_3", electricity*(375.0 + 12.5));
-	auto assembly_3            = assembly_3_impl / 1.25;
-	auto electric_furnace_impl = item("electric_furnace", electricity*(180.0 + 6.0));
-	auto electric_furnace      = electric_furnace_impl / 2.00;
-	auto chemical_plant        = item("chemical_plant", electricity*(210.0 + 7.0));
-	auto refinery              = item("refinery", electricity*(420.0 + 14.0));
+	auto assembly_1 = item("assembly_1", electricity * (75.0 + 2.5)) / 0.50;
+	auto assembly_2 = item("assembly_2", electricity * (150.0 + 5.0)) / 0.75;
+	auto assembly_3 = item("assembly_3", electricity * (375.0 + 12.5)) / 1.25;
+	auto electric_furnace = item("electric_furnace", electricity * (180.0 + 6.0)) / 2.00;
+	auto chemical_plant = item("chemical_plant", electricity * (210.0 + 7.0));
+	auto refinery = item("refinery", electricity * (420.0 + 14.0));
 	// mining speed 1 times the patch's yield: a 538% patch is 5.38, and the
 	// recipe below is 10 crude a second, which is what 100% yields. The dials
 	// are speeds too, so these three keep a term even at a base figure of 1.00.
-	auto pumpjack_impl         = item("pumpjack", electricity*(90.0 + 3.0));
-	auto pumpjack              = pumpjack_impl / (1.00 * (1 + mining_productivity));
-	auto electric_drill_impl   = item("electric_drill", electricity*(90.0 + 3.0));
-	auto electric_drill        = electric_drill_impl / (0.50 * (1 + mining_productivity));
-	auto lab_impl              = item("lab", electricity*(60.0 + 2.0));
-	auto lab                   = lab_impl / (1.00 * (1 + lab_research_speed));
+	auto pumpjack = item("pumpjack", electricity * (90.0 + 3.0)) / (1.00 * (1 + mining_productivity));
+	auto electric_drill = item("electric_drill", electricity * (90.0 + 3.0)) / (0.50 * (1 + mining_productivity));
+	auto lab = item("lab", electricity * (60.0 + 2.0)) / (1.00 * (1 + lab_research_speed));
 
 	// What is built. References, so they are not objects and take no part in
 	// the order -- and a reference to a local cannot name one written below it
 	// either, so these are checked like everything else.
-	auto& assembly = assembly_3;
-	auto& furnace  = electric_furnace;
-	auto& drill    = electric_drill;
+	auto& assembly = assembly_2;
+	auto& furnace = electric_furnace;
+	auto& drill = electric_drill;
 
 	// ore patches: mining time is 1 second for all four vanilla ores
-	auto iron_ore   = item("iron_ore",   drill);
+	auto iron_ore = item("iron_ore", drill);
 	auto copper_ore = item("copper_ore", drill);
-	auto coal       = item("coal",       drill);
-	auto stone      = item("stone",      drill);
-	auto crude_oil  = item("crude_oil",  pumpjack / 10);
+	auto coal = item("coal", drill);
+	auto stone = item("stone", drill);
+	auto crude_oil = item("crude_oil", pumpjack / 10);
 
 	// smelting
-	auto iron_plate   = item("iron_plate",   furnace*3.2  + iron_ore);
-	auto copper_plate = item("copper_plate", furnace*3.2  + copper_ore);
-	auto steel_plate  = item("steel_plate",  furnace*16.0 + iron_plate*5.0);
-	auto stone_brick  = item("stone_brick",  furnace*3.2  + stone*2.0);
+	auto iron_plate = item("iron_plate", furnace * 3.2 + iron_ore);
+	auto copper_plate = item("copper_plate", furnace * 3.2 + copper_ore);
+	auto steel_plate = item("steel_plate", furnace * 16.0 + iron_plate * 5.0);
+	auto stone_brick = item("stone_brick", furnace * 3.2 + stone * 2.0);
 
 	// oil
 	auto petroleum_gas = item("petroleum_gas",
-	                          (refinery*5.0 + crude_oil*100.0) / 45);
-	auto plastic_bar   = item("plastic_bar",
-	                          (chemical_plant + coal + petroleum_gas*20.0) / 2);
-	auto sulfur        = item("sulfur",
-	                          (chemical_plant + water*30.0 + petroleum_gas*30.0) / 2);
+		(refinery * 5.0 + crude_oil * 100.0) / 45);
+	auto plastic_bar = item("plastic_bar",
+		(chemical_plant + coal + petroleum_gas * 20.0) / 2);
+	auto sulfur = item("sulfur",
+		(chemical_plant + water * 30.0 + petroleum_gas * 30.0) / 2);
 
 	// intermediates
-	auto iron_gear    = item("iron_gear", assembly*0.5 + iron_plate*2.0);
-	auto copper_cable = item("copper_cable", (assembly*0.5 + copper_plate) / 2);
+	auto iron_gear = item("iron_gear", assembly * 0.5 + iron_plate * 2.0);
+	auto copper_cable = item("copper_cable", (assembly * 0.5 + copper_plate) / 2);
 	auto electronic_circuit = item("electronic_circuit",
-	                               assembly*0.5 + iron_plate + copper_cable*3.0);
-	auto pipe           = item("pipe", assembly*0.5 + iron_plate);
+		assembly * 0.5 + iron_plate + copper_cable * 3.0);
+	auto pipe = item("pipe", assembly * 0.5 + iron_plate);
 	auto transport_belt = item("transport_belt",
-	                           (assembly*0.5 + iron_gear + iron_plate) / 2);
-	auto inserter       = item("inserter",
-	                           assembly*0.5 + electronic_circuit + iron_gear + iron_plate);
+		(assembly * 0.5 + iron_gear + iron_plate) / 2);
+	auto inserter = item("inserter",
+		assembly * 0.5 + electronic_circuit + iron_gear + iron_plate);
 	auto advanced_circuit = item("advanced_circuit",
-	                             assembly*6.0 + plastic_bar*2.0
-	                             + electronic_circuit*2.0 + copper_cable*4.0);
-	auto engine_unit    = item("engine_unit",
-	                           assembly*10.0 + steel_plate + iron_gear + pipe*2.0);
+		assembly * 6.0 + plastic_bar * 2.0
+		+ electronic_circuit * 2.0 + copper_cable * 4.0);
+	auto engine_unit = item("engine_unit",
+		assembly * 10.0 + steel_plate + iron_gear + pipe * 2.0);
 
 	// military. A wall is five bricks, and a brick is two stone.
-	auto wall        = item("wall", assembly*0.5 + stone_brick*5.0);
-	auto firearm_mag = item("firearm_mag", assembly + iron_plate*4.0);
+	auto wall = item("wall", assembly * 0.5 + stone_brick * 5.0);
+	auto firearm_mag = item("firearm_mag", assembly + iron_plate * 4.0);
 	// 2.0.46 made this 2 at a time in 6s from 2 mags and 2 copper; in 1.1 it is
 	// assembly*3.0 + firearm_mag + copper_plate*5.0 + steel_plate, one at a time
 	auto piercing_mag = item("piercing_mag",
-	                         (assembly*6.0 + firearm_mag*2.0 + copper_plate*2.0
-	                          + steel_plate) / 2);
-	auto grenade      = item("grenade",
-	                         assembly*8.0 + coal*10.0 + iron_plate*5.0);  // 10 coal
+		(assembly * 6.0 + firearm_mag * 2.0 + copper_plate * 2.0
+			+ steel_plate) / 2);
+	auto grenade = item("grenade",
+		assembly * 8.0 + coal * 10.0 + iron_plate * 5.0);  // 10 coal
 
 	// science
 	auto automation_pack = item("automation_pack",
-	                            assembly*5.0 + copper_plate + iron_gear);
-	auto logistic_pack   = item("logistic_pack",
-	                            assembly*6.0 + inserter + transport_belt);
-	auto chemical_pack   = item("chemical_pack",
-	                            (assembly*24.0 + advanced_circuit*3.0
-	                             + engine_unit*2.0 + sulfur) / 2);
-	auto military_pack   = item("military_pack",
-	                            (assembly*10.0 + grenade + piercing_mag
-	                             + wall*2.0) / 2);
+		assembly * 5.0 + copper_plate + iron_gear);
+	auto logistic_pack = item("logistic_pack",
+		assembly * 6.0 + inserter + transport_belt);
+	auto chemical_pack = item("chemical_pack",
+		(assembly * 24.0 + advanced_circuit * 3.0
+			+ engine_unit * 2.0 + sulfur) / 2);
+	auto military_pack = item("military_pack",
+		(assembly * 10.0 + grenade + piercing_mag
+			+ wall * 2.0) / 2);
 
 	// One research unit is one of each pack the technology asks for, taking the
 	// technology's time. Drop the packs your current research does not need and
 	// the labs and their power fall out of the same graph.
 	auto research_unit = item("research_unit",
-		lab*30.0
-		//+ automation_pack 
-		//+ logistic_pack	                          
-		//+ chemical_pack 
+		lab * 30.0
+		+ automation_pack
+		+ logistic_pack
+		+ chemical_pack
 		+ military_pack
 	);
 
-	research_unit.rate += 1.0;
+	research_unit.rate += 0.3;
 }
 
 // ---------------------------------------------------------------------------
